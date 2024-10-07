@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 
-from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor, AutoConfig
 from qwen_vl_utils import process_vision_info
 
 # NOTE: Ignore TypedStorage warning, which refers to this link~(https://github.com/pytorch/pytorch/issues/97207#issuecomment-1494781560)
@@ -160,20 +160,37 @@ def videomme_dump(record, instruct, output):
     return letters[pred_idx]
 
 def run_inference(args):
-    # Initialize the Qwen2-VL model
+    # Modify the configuration parameters according to https://github.com/QwenLM/Qwen2-VL/issues/145
+    max_length = 65536
+
+    # 1. Load the original configuration
+    config = AutoConfig.from_pretrained(args.model_path)
+    
+    # 2. Modify the configuration
+    config.sliding_window = max_length
+    config.max_position_embeddings = max_length
+    config.model_max_length = max_length
+    
+    # 3. Initialize the model with the modified configuration
     model = Qwen2VLForConditionalGeneration.from_pretrained(
         args.model_path,
+        config=config,
         torch_dtype="auto",
         attn_implementation="flash_attention_2",
         device_map="auto",
     )
-
-    # Modify the configuration parameters according to https://github.com/QwenLM/Qwen2-VL/issues/145
-    model.config.sliding_window = 65536
-    model.config.max_position_embeddings = 65536
-    model.config.model_max_length = 65536
-    processor = AutoProcessor.from_pretrained(args.model_path)
+    
+    # 4. Initialize and update the tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+    tokenizer.model_max_length = max_length
+    
+    # 5. Verify the configurations
+    print(f"Model config - Sliding window: {model.config.sliding_window}")
+    print(f"Model config - Max position embeddings: {model.config.max_position_embeddings}")
+    print(f"Model config - Model max length: {model.config.model_max_length}")
+    print(f"Tokenizer max length: {tokenizer.model_max_length}")
+
+    processor = AutoProcessor.from_pretrained(args.model_path)
 
     answer_file = os.path.expanduser(args.answer_file)
     answer_sub_file = answer_file.replace('.json', '_sub.json')

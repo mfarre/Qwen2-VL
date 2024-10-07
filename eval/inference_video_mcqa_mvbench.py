@@ -101,6 +101,7 @@ class MVBenchDataset(Dataset):
         }
 
 tasks = {
+    "Episodic Reasoning": ("episodic_reasoning.json", "tvqa/frames_fps3_hq/", "frame", True),
     "Action Sequence": ("action_sequence.json", "star/Charades_v1_480/", "video", True),
     "Action Prediction": ("action_prediction.json", "star/Charades_v1_480/", "video", True),
     "Action Antonym": ("action_antonym.json", "ssv2_video/", "video", False),
@@ -119,8 +120,7 @@ tasks = {
     "Fine-grained Pose": ("fine_grained_pose.json", "nturgbd/", "video", False),
     "Character Order": ("character_order.json", "perception/videos/", "video", False),
     "Egocentric Navigation": ("egocentric_navigation.json", "vlnqa/", "video", False),
-    "Episodic Reasoning": ("episodic_reasoning.json", "tvqa/frames_fps3_hq/", "frame", True),
-    "Counterfactual Inference": ("counterfactual_inference.json", "clevrer/video_validation/", "video", False),
+    "Counterfactual Inference": ("counterfactual_inference.json", "clevrer/video_validation/", "video", False)
 }
 
 def build_mvbench_eval(args, processor, num_frames):
@@ -199,7 +199,7 @@ def run_inference(args):
             content = [
                 {
                     "type": "image",
-                    "image": img,
+                    "image": img['image'][0]
                     # "min_pixels": 50176,
                     # "max_pixels": 50176
                 } for img in visual_input
