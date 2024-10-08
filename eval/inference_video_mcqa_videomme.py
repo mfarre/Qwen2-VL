@@ -160,7 +160,7 @@ def videomme_dump(record, instruct, output):
     return letters[pred_idx]
 
 def run_inference(args):
-    # Modify the configuration parameters according to https://github.com/QwenLM/Qwen2-VL/issues/145
+    # Modify the configuration parameters
     max_length = 65536
 
     # 1. Load the original configuration
@@ -184,13 +184,19 @@ def run_inference(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     tokenizer.model_max_length = max_length
     
-    # 5. Verify the configurations
+    # 5. Initialize and update the processor
+    processor = AutoProcessor.from_pretrained(args.model_path)
+    # processor.image_processor.size = {"height": 448, "width": 448}  # Adjust as needed
+    processor.tokenizer = tokenizer  # Use the updated tokenizer
+    
+    # 6. Verify the configurations
     print(f"Model config - Sliding window: {model.config.sliding_window}")
     print(f"Model config - Max position embeddings: {model.config.max_position_embeddings}")
     print(f"Model config - Model max length: {model.config.model_max_length}")
     print(f"Tokenizer max length: {tokenizer.model_max_length}")
+    print(f"Processor image size: {processor.image_processor.size}")
+    print(f"Processor tokenizer max length: {processor.tokenizer.model_max_length}")
 
-    processor = AutoProcessor.from_pretrained(args.model_path)
 
     answer_file = os.path.expanduser(args.answer_file)
     answer_sub_file = answer_file.replace('.json', '_sub.json')

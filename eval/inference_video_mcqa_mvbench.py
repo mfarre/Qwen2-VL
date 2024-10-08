@@ -216,7 +216,7 @@ def run_inference(args):
                 "content": content,
             }
         ]
-
+        print(messages)
         # Process input for Qwen2-VL
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         image_inputs, video_inputs = process_vision_info(messages)
