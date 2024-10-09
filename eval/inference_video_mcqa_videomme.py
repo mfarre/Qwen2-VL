@@ -20,6 +20,9 @@ from qwen_vl_utils import process_vision_info
 # NOTE: Ignore TypedStorage warning, which refers to this link~(https://github.com/pytorch/pytorch/issues/97207#issuecomment-1494781560)
 warnings.filterwarnings('ignore', category=UserWarning, message='TypedStorage is deprecated')
 
+# Set the PyTorch memory management option
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 def split_list(lst, n):
     """Split a list into n (roughly) equal-sized chunks"""
     chunk_size = math.ceil(len(lst) / n)  # integer division
@@ -28,21 +31,6 @@ def split_list(lst, n):
 def get_chunk(lst, n, k):
     chunks = split_list(lst, n)
     return chunks[k]
-
-# def get_seq_frames(total_num_frames, desired_num_frames):
-#     """
-#     Calculate the indices of frames to extract from a video.
-
-#     Parameters:
-#     total_num_frames (int): Total number of frames in the video.
-#     desired_num_frames (int): Desired number of frames to extract.
-
-#     Returns:
-#     list: List of indices of frames to extract.
-#     """
-#     seg_size = float(total_num_frames - 1) / desired_num_frames
-#     seq = [(int(np.round(seg_size * i)) + int(np.round(seg_size * (i + 1)))) // 2 for i in range(desired_num_frames)]
-#     return seq
 
 class VideoMMEDataset(Dataset):
     video_formats = ['.mp4', '.avi', '.mov', '.mkv']
@@ -70,22 +58,13 @@ class VideoMMEDataset(Dataset):
         subtitle_path = os.path.join(self.subtitle_folder, f'{video_ytid}.srt')
 
         try:
-            # Use Qwen2-VL's video processing method
-            # video_tensor = {"type": "video", "video": video_path, "max_pixels": 360 * 420, "fps": 1.0}
             video_tensor = {"type": "video", "video": video_path, "fps": 1.0}
-
-            # We'll process the video later in the collate_fn
         except:
             traceback.print_exc()
             print(f'It occurs error when reading {video_ytid}')
             video_tensor = None
 
         if video_tensor is not None and os.path.exists(subtitle_path):
-            # cv2_vr = cv2.VideoCapture(video_path)
-            # duration = int(cv2_vr.get(cv2.CAP_PROP_FRAME_COUNT))
-            # fps = cv2_vr.get(cv2.CAP_PROP_FPS)
-            # # We don't need to select frames here as Qwen2-VL will handle it
-
             subs = pysubs2.load(subtitle_path, encoding="utf-8")
             subtitles = [sub.text.replace("\\N", " ") for sub in subs]
             subtitles = "\n".join(subtitles)
@@ -159,6 +138,29 @@ def videomme_dump(record, instruct, output):
         pred_idx = 2
     return letters[pred_idx]
 
+def reduce_video_frames(video_input, max_frames=50):
+    """
+    Reduce the number of frames in a video tensor to a maximum of max_frames.
+    
+    Args:
+    video_input (torch.Tensor): Input video tensor of shape [num_frames, channels, height, width]
+    max_frames (int): Maximum number of frames in the output tensor
+    
+    Returns:
+    torch.Tensor: Video tensor with reduced number of frames
+    """
+    num_frames, channels, height, width = video_input.shape
+    
+    if num_frames <= max_frames:
+        return video_input
+    
+    # Calculate indices of frames to keep
+    keep_indices = torch.linspace(0, num_frames - 1, max_frames).long()
+    
+    # Select frames
+    reduced_video = video_input[keep_indices]
+    
+    return reduced_video
 def run_inference(args):
     # Modify the configuration parameters
     max_length = 65536
@@ -186,7 +188,6 @@ def run_inference(args):
     
     # 5. Initialize and update the processor
     processor = AutoProcessor.from_pretrained(args.model_path)
-    # processor.image_processor.size = {"height": 448, "width": 448}  # Adjust as needed
     processor.tokenizer = tokenizer  # Use the updated tokenizer
     
     # 6. Verify the configurations
@@ -197,7 +198,6 @@ def run_inference(args):
     print(f"Processor image size: {processor.image_processor.size}")
     print(f"Processor tokenizer max length: {processor.tokenizer.model_max_length}")
 
-
     answer_file = os.path.expanduser(args.answer_file)
     answer_sub_file = answer_file.replace('.json', '_sub.json')
     os.makedirs(os.path.dirname(answer_file), exist_ok=True)
@@ -207,6 +207,9 @@ def run_inference(args):
     val_loader = build_videomme_eval(args, processor)
 
     for i, (videos, subtitles, records) in enumerate(tqdm(val_loader)):
+        # Clear CUDA cache at the start of each video iteration
+        torch.cuda.empty_cache()
+
         video = videos[0]
         subtitle = subtitles[0]
         record = records[0]
@@ -249,10 +252,15 @@ def run_inference(args):
             # Process input for Qwen2-VL
             text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             image_inputs, video_inputs = process_vision_info(messages)
+            reduced_video_inputs = [reduce_video_frames(vi, max_frames=32) for vi in video_inputs]
+
+            for v in reduced_video_inputs:
+                print(f"Type: {type(v)}, Shape: {v.shape if hasattr(v, 'shape') else 'N/A'}")
+
             inputs = processor(
                 text=[text],
                 images=image_inputs,
-                videos=video_inputs,
+                videos=reduced_video_inputs,
                 padding=True,
                 return_tensors="pt",
             )
@@ -281,7 +289,7 @@ def run_inference(args):
             inputs_with_sub = processor(
                 text=[text_with_sub],
                 images=image_inputs,
-                videos=video_inputs,
+                videos=reduced_video_inputs,
                 padding=True,
                 return_tensors="pt",
             )
